@@ -1711,6 +1711,8 @@ end
 
 -- Detect how many columns a bar has by comparing button Y positions.
 -- Buttons in the same row share a similar top edge; a new row drops down.
+-- Detect how many columns a bar has by comparing button Y positions.
+-- Fallback for bars without Edit Mode API (pet, stance).
 local function DetectBarColumns(buttons)
     if #buttons < 2 then return #buttons end
 
@@ -1732,11 +1734,46 @@ local function DetectBarColumns(buttons)
     return numCols
 end
 
+-- Read the bar's grid layout from the Edit Mode API.
+-- Returns numCols, numRows, isVertical.
+-- Falls back to position-based detection for bars without the API (pet, stance).
+local function GetBarGridLayout(barFrame, buttons)
+    local isVertical = false
+    local numCols, numRows
+
+    local EditModeSettings = Enum.EditModeActionBarSetting
+    if barFrame.GetSettingValue and EditModeSettings then
+        local okO, orientation = pcall(barFrame.GetSettingValue, barFrame, EditModeSettings.Orientation)
+        local okR, editNumRows = pcall(barFrame.GetSettingValue, barFrame, EditModeSettings.NumRows)
+
+        if okO and okR and editNumRows and editNumRows > 0 then
+            isVertical = (orientation == 1)
+            if isVertical then
+                -- Vertical: Blizzard's "NumRows" is the number of visual columns
+                numCols = editNumRows
+                numRows = math.ceil(#buttons / numCols)
+            else
+                -- Horizontal: NumRows is actual rows
+                numRows = editNumRows
+                numCols = math.ceil(#buttons / numRows)
+            end
+        end
+    end
+
+    -- Fallback for bars without Edit Mode API
+    if not numCols then
+        numCols = DetectBarColumns(buttons)
+        numRows = math.ceil(#buttons / numCols)
+    end
+
+    return numCols, numRows, isVertical
+end
+
 -- Reposition action bar buttons with custom spacing override.
 -- WoW 12.0 wraps each button in a per-button container managed by an internal
--- LayoutFrame. We anchor button 1 directly to the bar frame (cross-hierarchy
--- SetPoint bypasses the LayoutFrame), chain buttons 2..N off it, then resize
--- the bar frame to exactly fit the button group (eliminates Blizzard's edge padding).
+-- LayoutFrame. We reposition the containers (not the buttons) to override
+-- Blizzard's layout, then resize the bar frame to exactly fit the group.
+-- Supports both horizontal and vertical bar orientations via Edit Mode API.
 local function ApplyButtonSpacing(barKey)
     if InCombatLockdown() then
         ActionBars.pendingSpacing = true
@@ -1753,8 +1790,7 @@ local function ApplyButtonSpacing(barKey)
     local barFrame = GetBarFrame(barKey)
     if not barFrame then return end
 
-    -- Detect grid columns BEFORE moving anything (reads Blizzard's original Y positions)
-    local numCols = DetectBarColumns(buttons)
+    local numCols, numRows, isVertical = GetBarGridLayout(barFrame, buttons)
 
     -- Effective scales for coordinate space conversion
     local containerEffScale = buttons[1]:GetParent():GetEffectiveScale()
@@ -1764,7 +1800,6 @@ local function ApplyButtonSpacing(barKey)
     -- Group dimensions in container coordinate space (buttons are scale 1.0 inside containers)
     local btnWidth = buttons[1]:GetWidth()
     local btnHeight = buttons[1]:GetHeight()
-    local numRows = math.ceil(#buttons / numCols)
     local groupWidth = numCols * btnWidth + math.max(0, numCols - 1) * spacing
     local groupHeight = numRows * btnHeight + math.max(0, numRows - 1) * spacing
 
@@ -1775,25 +1810,86 @@ local function ApplyButtonSpacing(barKey)
         groupHeight * containerEffScale / barEffScale
     )
 
-    -- Anchor button 1 to bar frame BOTTOMLEFT (bar now fits exactly, no offset needed)
-    buttons[1]:ClearAllPoints()
-    buttons[1]:SetPoint("BOTTOMLEFT", barFrame, "BOTTOMLEFT", 0, 0)
+    -- Reposition the CONTAINERS (button parents) instead of the buttons themselves.
+    -- Blizzard's LayoutFrame positions containers; button-level anchors don't
+    -- override the visual layout because the container is what renders.
+    local container1 = buttons[1]:GetParent()
+    container1:ClearAllPoints()
+    container1:SetPoint("TOPLEFT", barFrame, "TOPLEFT", 0, 0)
+    container1:SetSize(btnWidth, btnHeight)
 
-    -- Chain buttons 2..N off button 1
-    for i = 2, #buttons do
-        local colIndex = ((i - 1) % numCols) + 1
+    if isVertical then
+        -- Vertical: buttons flow top-to-bottom, then wrap to the next column
+        local buttonsPerCol = numRows
+        for i = 2, #buttons do
+            local container = buttons[i]:GetParent()
+            local rowInCol = (i - 1) % buttonsPerCol  -- 0 = first in new column
 
-        if colIndex == 1 then
-            -- First button in a new row: anchor below the button directly above
-            local aboveIndex = i - numCols
-            if aboveIndex >= 1 then
-                buttons[i]:ClearAllPoints()
-                buttons[i]:SetPoint("TOPLEFT", buttons[aboveIndex], "BOTTOMLEFT", 0, -spacing)
+            container:ClearAllPoints()
+            if rowInCol == 0 then
+                -- First button in a new column: anchor to the right of the column start
+                local prevColStart = i - buttonsPerCol
+                container:SetPoint("TOPLEFT", buttons[prevColStart]:GetParent(), "TOPRIGHT", spacing, 0)
+            else
+                -- Same column: anchor below previous button
+                container:SetPoint("TOPLEFT", buttons[i - 1]:GetParent(), "BOTTOMLEFT", 0, -spacing)
             end
-        else
-            -- Same row: anchor to the right of the previous button
-            buttons[i]:ClearAllPoints()
-            buttons[i]:SetPoint("LEFT", buttons[i - 1], "RIGHT", spacing, 0)
+            container:SetSize(btnWidth, btnHeight)
+        end
+    else
+        -- Horizontal: buttons flow left-to-right, then wrap to the next row
+        for i = 2, #buttons do
+            local container = buttons[i]:GetParent()
+            local colIndex = ((i - 1) % numCols) + 1
+
+            container:ClearAllPoints()
+            if colIndex == 1 then
+                -- First container in a new row: anchor below the container above
+                local aboveContainer = buttons[i - numCols]:GetParent()
+                container:SetPoint("TOPLEFT", aboveContainer, "BOTTOMLEFT", 0, -spacing)
+            else
+                -- Same row: anchor to the right of the previous container
+                local prevContainer = buttons[i - 1]:GetParent()
+                container:SetPoint("LEFT", prevContainer, "RIGHT", spacing, 0)
+            end
+            container:SetSize(btnWidth, btnHeight)
+        end
+    end
+
+    -- Re-anchor each button to fill its container (undo any previous cross-hierarchy anchors)
+    for i = 1, #buttons do
+        buttons[i]:ClearAllPoints()
+        buttons[i]:SetAllPoints(buttons[i]:GetParent())
+    end
+end
+
+-- Restore buttons and containers back to Blizzard's default layout.
+-- Invalidates the LayoutFrame so Blizzard can recalculate container positions
+-- (e.g., after column/row changes in Edit Mode).
+local function RestoreButtonsToContainers()
+    if InCombatLockdown() then return end
+
+    local settings = GetGlobalSettings()
+    if not settings or settings.buttonSpacing == nil then return end
+
+    for barKey, _ in pairs(BUTTON_PATTERNS) do
+        local barFrame = GetBarFrame(barKey)
+        local buttons = GetBarButtons(barKey)
+        for _, button in ipairs(buttons) do
+            -- Restore button to fill its container
+            button:ClearAllPoints()
+            button:SetAllPoints(button:GetParent())
+        end
+
+        -- Invalidate the LayoutFrame so Blizzard recalculates container positions.
+        -- The containers are children of a LayoutFrame inside the bar frame.
+        if barFrame and #buttons > 0 then
+            local layoutParent = buttons[1]:GetParent():GetParent()
+            if layoutParent and layoutParent.MarkDirty then
+                layoutParent:MarkDirty()
+            elseif layoutParent and layoutParent.Layout then
+                layoutParent:Layout()
+            end
         end
     end
 end
@@ -2786,6 +2882,10 @@ do
     local core = GetCore()
     if core and core.RegisterEditModeEnter then
         core:RegisterEditModeEnter(function()
+            -- Re-apply our spacing so the layout looks correct during Edit Mode too.
+            -- Blizzard's LayoutFrame will recalculate on exit; we re-apply again then.
+            ApplyAllBarSpacing()
+
             -- Force all bars to full opacity and cancel pending fades
             for barKey, state in pairs(ActionBars.fadeState) do
                 state.isFading = false
