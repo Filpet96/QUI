@@ -635,6 +635,7 @@ local defaults = {
                 rangeIndicator = true,
                 rangeColor = {0.8, 0.1, 0.1, 1},
                 usabilityIndicator = true,
+                clickableIcons = false,
                 layoutDirection = "HORIZONTAL",
                 row1 = {
                     iconCount = 8,      -- How many icons in row 1 (0 = disabled)
@@ -708,6 +709,7 @@ local defaults = {
                 rangeIndicator = true,
                 rangeColor = {0.8, 0.1, 0.1, 1},
                 usabilityIndicator = true,
+                clickableIcons = false,
                 layoutDirection = "HORIZONTAL",
                 row1 = {
                     iconCount = 6,
@@ -3599,7 +3601,18 @@ function QUICore:OnProfileChanged(event, db, profileKey)
     if self._preservedPanelAlpha then
         self.db.profile.configPanelAlpha = self._preservedPanelAlpha
     end
-    
+
+    -- Invalidate options panel — cached widgets hold stale profile table references
+    if QUI.GUI and QUI.GUI.MainFrame then
+        QUI.GUI.MainFrame:Hide()
+        QUI.GUI.MainFrame:SetParent(nil)
+        QUI.GUI.MainFrame = nil
+        QUI.GUI._searchIndexBuilt = false
+        QUI.GUI._allTabsAdded = false
+        QUI.GUI.SettingsRegistry = {}
+        QUI.GUI.SettingsRegistryKeys = {}
+    end
+
     if self.RefreshAll then
         self:RefreshAll()
     end
