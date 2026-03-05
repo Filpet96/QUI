@@ -667,17 +667,10 @@ local function GetSpellBuffInfo(spellID)
         if isActive then
             return true, expiration, duration
         end
-        -- If we're in combat and SpellScanner didn't detect it, we can't query auras safely.
-        if InCombatLockdown() then
-            return false
-        end
-    elseif InCombatLockdown() then
-        -- No SpellScanner available, and we can't query auras in combat.
-        return false
     end
 
-    -- Out of combat: use direct API (more accurate)
-    -- pcall guards against unexpected protection in instanced content
+    -- Fallback: direct aura API (read-only, safe in combat).
+    -- Catches pre-existing buffs SpellScanner doesn't track (food, flasks, world buffs).
     if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
         local ok, auraData = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
         if ok and auraData then
@@ -718,11 +711,21 @@ local function GetSpellActiveInfo(spellID)
     return false
 end
 
+-- Cache: itemID → spellID mapping (C_Item.GetItemSpell can fail in combat)
+local _itemSpellCache = {}
+
 -- Check if an item's buff/effect is currently active
 -- Returns: isActive, startTimeSec, durationSec, activeType
 local function GetItemActiveInfo(itemID)
     if not itemID then return false end
-    local itemSpellID = select(2, C_Item.GetItemSpell(itemID))
+    local itemSpellID = _itemSpellCache[itemID]
+    if not itemSpellID then
+        local ok, spellName, spellID = pcall(C_Item.GetItemSpell, itemID)
+        if ok and spellID then
+            _itemSpellCache[itemID] = spellID
+            itemSpellID = spellID
+        end
+    end
     if itemSpellID then
         return GetSpellActiveInfo(itemSpellID)
     end
@@ -2992,6 +2995,7 @@ initFrame:SetScript("OnEvent", function(self, event, ...)
                         if info and info.icon then
                             icon.tex:SetTexture(info.icon)
                         end
+                        UpdateIconSecureAttributes(icon, icon.entry, bar.config)
                     elseif icon.entry and icon.entry.type == "slot" then
                         -- Check if this slot's current item matches the loaded itemID
                         local slotItemID = GetInventoryItemID("player", icon.entry.id)
@@ -3002,6 +3006,7 @@ initFrame:SetScript("OnEvent", function(self, event, ...)
                             if info and info.icon then
                                 icon.tex:SetTexture(info.icon)
                             end
+                            UpdateIconSecureAttributes(icon, icon.entry, bar.config)
                         end
                     end
                 end
