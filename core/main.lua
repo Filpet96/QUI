@@ -626,7 +626,6 @@ local defaults = {
         -- QUI New Cooldown Display Manager (NCDM)
         -- Per-row configuration for Essential and Utility viewers
         ncdm = {
-            enabled = true,   -- Set false to disable CDM entirely (uses Blizzard default; reload UI to apply)
             engine = "owned",  -- CDM engine: "classic" (Blizzard hooks) or "owned" (addon-owned frames)
             essential = {
                 enabled = true,
@@ -837,6 +836,7 @@ local defaults = {
                 fillDirection = "up",
                 iconPosition = "top",
                 showTextOnVertical = false,
+                pos = nil,  -- owned container position (seeded from Blizzard viewer on first init)
             },
             customBuffs = {
                 enabled = true,
@@ -869,6 +869,7 @@ local defaults = {
             showInGroup = false,
             showInInstance = false,
             showOnMouseover = false,
+            showWhenHealthBelow100 = false,
             fadeDuration = 0.2,
             fadeOutAlpha = 0,
             alwaysShowCastbars = false,  -- When true, castbars ignore UF visibility
@@ -1154,6 +1155,8 @@ local defaults = {
             staggerHeavy = { 1.00, 0.42, 0.42, 1 },     -- Red (60%+ of max health)
             useStaggerLevelColors = true,               -- Enable dynamic stagger colors
             soulFragments = { 0.64, 0.19, 0.79, 1 },
+            whirlwind = { 0.90, 0.20, 0.20, 1 },           -- Red (Warrior theme)
+            tipOfTheSpear = { 0.00, 0.80, 0.30, 1 },       -- Green (Hunter/Survival theme)
             runes = { 0.77, 0.12, 0.23, 1 },
             bloodRunes = { 0.77, 0.12, 0.23, 1 },
             frostRunes = { 0.00, 0.82, 1.00, 1 },
@@ -1946,6 +1949,14 @@ local defaults = {
                     xOffset = -8,
                     yOffset = 8,
                 },
+                -- Classification icon (elite/rare/boss indicator)
+                classificationIcon = {
+                    enabled = false,
+                    size = 16,
+                    anchor = "LEFT",
+                    xOffset = -8,
+                    yOffset = 0,
+                },
             },
             -- Target of Target
             targettarget = {
@@ -2252,6 +2263,14 @@ local defaults = {
                     xOffset = -8,
                     yOffset = 8,
                 },
+                -- Classification icon (elite/rare/boss indicator)
+                classificationIcon = {
+                    enabled = false,
+                    size = 16,
+                    anchor = "LEFT",
+                    xOffset = -8,
+                    yOffset = 0,
+                },
             },
             -- Boss frames
             boss = {
@@ -2347,6 +2366,14 @@ local defaults = {
                     anchor = "TOP",
                     xOffset = 0,
                     yOffset = 8,
+                },
+                -- Classification icon (elite/rare/boss indicator)
+                classificationIcon = {
+                    enabled = false,
+                    size = 16,
+                    anchor = "LEFT",
+                    xOffset = -8,
+                    yOffset = 0,
                 },
             },
         },
@@ -2856,7 +2883,7 @@ local defaults = {
             showBuffIconSwipe = false,  -- BuffIcon viewer swipe (opt-in)
             showGCDSwipe = false,       -- GCD swipe (~1.5s)
             showCooldownSwipe = false,  -- Actual spell cooldown swipe
-            showRechargeEdge = false,   -- Yellow edge on multi-charge abilities
+
             showActionSwipe = true,     -- Action bar cooldown swipe
             showNcdmSwipe = true,       -- NCDM cooldown swipe
             showCustomTrackerSwipe = true, -- Custom tracker cooldown swipe
@@ -3322,6 +3349,7 @@ local defaults = {
             -- Totem bar
             totemBar = 5,
         },
+        frameAnchoring = {},
     },
     -- Account-wide storage (shared across all characters)
     global = {

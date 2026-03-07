@@ -1317,6 +1317,50 @@ local function UpdateLeaderIcon(frame)
 end
 
 ---------------------------------------------------------------------------
+-- UPDATE: Classification Icon (elite/rare/boss dragon/skull indicator)
+---------------------------------------------------------------------------
+-- Classification → Blizzard atlas textures
+-- Dragon for elite/rareelite, star for rare, skull for worldboss
+local CLASSIFICATION_DATA = {
+    worldboss = { atlas = "worldquest-icon-boss",        color = {1, 0.85, 0} },
+    elite     = { atlas = "nameplates-icon-elite-gold",  color = {1, 0.84, 0} },
+    rare      = { atlas = "nameplates-icon-elite-silver", color = {0.7, 0.7, 0.7} },
+    rareelite = { atlas = "nameplates-icon-elite-gold",  color = {1, 0.5, 0} },
+}
+
+local function UpdateClassificationIcon(frame)
+    if not frame or not frame.unit or not frame.classificationIcon then return end
+    local settings = GetUnitSettings(frame.unitKey)
+    if not settings or not settings.classificationIcon or not settings.classificationIcon.enabled then
+        if frame.classificationIcon then frame.classificationIcon:Hide() end
+        return
+    end
+
+    if not UnitExists(frame.unit) then
+        frame.classificationIcon:Hide()
+        return
+    end
+
+    local classification = UnitClassification(frame.unit)
+    -- Boss-level mobs (skull, level -1) may return "normal" from UnitClassification
+    if not CLASSIFICATION_DATA[classification] then
+        local level = UnitLevel(frame.unit)
+        if level and level == -1 then
+            classification = "worldboss"
+        end
+    end
+    local data = CLASSIFICATION_DATA[classification]
+
+    if data then
+        frame.classificationIcon:SetAtlas(data.atlas)
+        frame.classificationIcon:SetVertexColor(data.color[1], data.color[2], data.color[3])
+        frame.classificationIcon:Show()
+    else
+        frame.classificationIcon:Hide()
+    end
+end
+
+---------------------------------------------------------------------------
 -- UPDATE: Health text color (independent of name visibility)
 ---------------------------------------------------------------------------
 local function UpdateHealthTextColor(frame)
@@ -1473,6 +1517,7 @@ local function UpdateFrame(frame)
     UpdateStance(frame)
     UpdateTargetMarker(frame)
     UpdateLeaderIcon(frame)
+    UpdateClassificationIcon(frame)
 
     -- Update portrait texture (third param disables circular mask for square portrait)
     if frame.portraitTexture and frame.portrait and frame.portrait:IsShown() then
@@ -1702,6 +1747,24 @@ local function CreateBossFrame(unit, frameKey, bossIndex)
         frame.targetMarker = targetMarker
     end
 
+    -- Classification Icon (elite/rare/boss indicator - boss frames)
+    if settings.classificationIcon and settings.classificationIcon.enabled then
+        if not frame.indicatorFrame then
+            local indicatorFrame = CreateFrame("Frame", nil, frame)
+            indicatorFrame:SetAllPoints()
+            indicatorFrame:SetFrameLevel(healthBar:GetFrameLevel() + 5)
+            frame.indicatorFrame = indicatorFrame
+        end
+
+        local ci = settings.classificationIcon
+        local classificationIcon = frame.indicatorFrame:CreateTexture(nil, "OVERLAY")
+        classificationIcon:SetSize(ci.size or 16, ci.size or 16)
+        local anchorInfo = GetTextAnchorInfo(ci.anchor or "LEFT")
+        classificationIcon:SetPoint(anchorInfo.point, frame, anchorInfo.point, ci.xOffset or -8, ci.yOffset or 0)
+        classificationIcon:Hide()
+        frame.classificationIcon = classificationIcon
+    end
+
     -- Register events for updates
     -- Throttle UNIT_POWER_FREQUENT to ~5 updates/sec (0.2s) to reduce CPU.
     -- UNIT_POWER_UPDATE and UNIT_MAXPOWER are processed immediately (infrequent).
@@ -1740,6 +1803,11 @@ local function CreateBossFrame(unit, frameKey, bossIndex)
             end
         elseif event == "RAID_TARGET_UPDATE" then
             UpdateTargetMarker(self)
+        elseif event == "UNIT_CLASSIFICATION_CHANGED" then
+            local eventUnit = ...
+            if eventUnit == self.unit then
+                UpdateClassificationIcon(self)
+            end
         end
     end)
 
@@ -1763,6 +1831,11 @@ local function CreateBossFrame(unit, frameKey, bossIndex)
     frame:RegisterUnitEvent("UNIT_MAXPOWER", unit)
     frame:RegisterUnitEvent("UNIT_NAME_UPDATE", unit)
     frame:RegisterEvent("RAID_TARGET_UPDATE")  -- Target marker (skull, cross, etc.)
+
+    -- Classification icon events (boss frames) - only register if feature enabled
+    if settings.classificationIcon and settings.classificationIcon.enabled then
+        frame:RegisterUnitEvent("UNIT_CLASSIFICATION_CHANGED", unit)
+    end
 
     -- Register with Clique if available
     if _G.ClickCastFrames then
@@ -2196,6 +2269,25 @@ local function CreateUnitFrame(unit, unitKey)
         frame.leaderIcon = leaderIcon
     end
 
+    -- Classification Icon (elite/rare/boss indicator - target, focus, boss only)
+    if settings.classificationIcon and settings.classificationIcon.enabled and (unitKey == "target" or unitKey == "focus") then
+        -- Create indicator container if not exists
+        if not frame.indicatorFrame then
+            local indicatorFrame = CreateFrame("Frame", nil, frame)
+            indicatorFrame:SetAllPoints()
+            indicatorFrame:SetFrameLevel(textFrame:GetFrameLevel() + 5)
+            frame.indicatorFrame = indicatorFrame
+        end
+
+        local ci = settings.classificationIcon
+        local classificationIcon = frame.indicatorFrame:CreateTexture(nil, "OVERLAY")
+        classificationIcon:SetSize(ci.size or 16, ci.size or 16)
+        local anchorInfo = GetTextAnchorInfo(ci.anchor or "LEFT")
+        classificationIcon:SetPoint(anchorInfo.point, frame, anchorInfo.point, ci.xOffset or -8, ci.yOffset or 0)
+        classificationIcon:Hide()
+        frame.classificationIcon = classificationIcon
+    end
+
     -- Event handling
     frame:RegisterEvent("PLAYER_ENTERING_WORLD")
     frame:RegisterUnitEvent("UNIT_HEALTH", unit)
@@ -2217,6 +2309,11 @@ local function CreateUnitFrame(unit, unitKey)
     if settings.leaderIcon and settings.leaderIcon.enabled and (unitKey == "player" or unitKey == "target" or unitKey == "focus") then
         frame:RegisterEvent("PARTY_LEADER_CHANGED")
         frame:RegisterEvent("GROUP_ROSTER_UPDATE")
+    end
+
+    -- Classification icon events (target, focus only) - only register if feature enabled
+    if settings.classificationIcon and settings.classificationIcon.enabled and (unitKey == "target" or unitKey == "focus") then
+        frame:RegisterEvent("UNIT_CLASSIFICATION_CHANGED")
     end
 
     -- Indicator-specific events (player only)
@@ -2300,6 +2397,11 @@ local function CreateUnitFrame(unit, unitKey)
         elseif event == "PARTY_LEADER_CHANGED" or event == "GROUP_ROSTER_UPDATE" then
             -- Leader/Assistant status changed (player, target, focus only)
             UpdateLeaderIcon(self)
+        elseif event == "UNIT_CLASSIFICATION_CHANGED" then
+            -- Classification changed (elite/rare/boss) - target, focus only
+            if arg1 == self.unit then
+                UpdateClassificationIcon(self)
+            end
         elseif arg1 == self.unit then
             if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
                 UpdateHealth(self)
@@ -2434,6 +2536,16 @@ function QUI_UF:ShowPreview(unitKey)
                     else
                         local c = general and general.defaultHealthColor or { 0.2, 0.2, 0.2, 1 }
                         frame.healthBar:SetStatusBarColor(c[1], c[2], c[3], c[4] or 1)
+                    end
+                end
+
+                -- Show classification icon preview (fake "elite" for boss frames)
+                if frame.classificationIcon and settings.classificationIcon and settings.classificationIcon.enabled then
+                    local data = CLASSIFICATION_DATA["elite"]
+                    if data then
+                        frame.classificationIcon:SetAtlas(data.atlas)
+                        frame.classificationIcon:SetVertexColor(data.color[1], data.color[2], data.color[3])
+                        frame.classificationIcon:Show()
                     end
                 end
 
@@ -2573,6 +2685,16 @@ function QUI_UF:ShowPreview(unitKey)
             frame.healthBar:SetStatusBarColor(c[1], c[2], c[3], c[4] or 1)
         end
     end
+
+    -- Show classification icon preview (fake "elite" for target/focus)
+    if frame.classificationIcon and settings and settings.classificationIcon and settings.classificationIcon.enabled then
+        local data = CLASSIFICATION_DATA["elite"]
+        if data then
+            frame.classificationIcon:SetAtlas(data.atlas)
+            frame.classificationIcon:SetVertexColor(data.color[1], data.color[2], data.color[3])
+            frame.classificationIcon:Show()
+        end
+    end
 end
 
 function QUI_UF:HidePreview(unitKey)
@@ -2595,6 +2717,11 @@ function QUI_UF:HidePreview(unitKey)
                     frame:Show()
                 else
                     frame:Hide()
+                end
+
+                -- Hide classification icon preview
+                if frame.classificationIcon then
+                    frame.classificationIcon:Hide()
                 end
 
                 -- Hide boss castbar preview
@@ -2634,6 +2761,11 @@ function QUI_UF:HidePreview(unitKey)
         end
     end
     
+    -- Hide classification icon preview
+    if frame.classificationIcon then
+        frame.classificationIcon:Hide()
+    end
+
     -- Restore real state
     if UnitExists(frame.unit) or unitKey == "player" then
         UpdateFrame(frame)
@@ -2855,6 +2987,41 @@ function QUI_UF:RefreshFrame(unitKey)
                     local anchorInfo = GetTextAnchorInfo(marker.anchor or "TOP")
                     frame.targetMarker:SetPoint(anchorInfo.point, frame, anchorInfo.point, marker.xOffset or 0, marker.yOffset or 8)
                     UpdateTargetMarker(frame)
+                end
+
+                -- Update classification icon (boss frames)
+                if settings.classificationIcon and settings.classificationIcon.enabled then
+                    -- Create icon if it doesn't exist (feature was enabled after initial load)
+                    if not frame.classificationIcon then
+                        if not frame.indicatorFrame then
+                            local indicatorFrame = CreateFrame("Frame", nil, frame)
+                            indicatorFrame:SetAllPoints()
+                            indicatorFrame:SetFrameLevel(frame.healthBar:GetFrameLevel() + 5)
+                            frame.indicatorFrame = indicatorFrame
+                        end
+                        local classificationIcon = frame.indicatorFrame:CreateTexture(nil, "OVERLAY")
+                        classificationIcon:Hide()
+                        frame.classificationIcon = classificationIcon
+                        frame:RegisterUnitEvent("UNIT_CLASSIFICATION_CHANGED", frame.unit)
+                    end
+                    local ci = settings.classificationIcon
+                    frame.classificationIcon:SetSize(ci.size or 16, ci.size or 16)
+                    frame.classificationIcon:ClearAllPoints()
+                    local anchorInfo = GetTextAnchorInfo(ci.anchor or "LEFT")
+                    frame.classificationIcon:SetPoint(anchorInfo.point, frame, anchorInfo.point, ci.xOffset or -8, ci.yOffset or 0)
+                    -- In preview mode, show fake "elite" icon; otherwise update from real unit
+                    if self.previewMode[bossKey] then
+                        local data = CLASSIFICATION_DATA["elite"]
+                        if data then
+                            frame.classificationIcon:SetAtlas(data.atlas)
+                            frame.classificationIcon:SetVertexColor(data.color[1], data.color[2], data.color[3])
+                            frame.classificationIcon:Show()
+                        end
+                    else
+                        UpdateClassificationIcon(frame)
+                    end
+                elseif frame.classificationIcon then
+                    frame.classificationIcon:Hide()
                 end
 
                 -- Only update with real data if not in preview mode
@@ -3242,6 +3409,39 @@ function QUI_UF:RefreshFrame(unitKey)
         elseif frame.leaderIcon then
             -- Feature disabled - hide the icon
             frame.leaderIcon:Hide()
+        end
+    end
+
+    -- Update classification icon (target, focus, boss)
+    if settings.classificationIcon and (unitKey == "target" or unitKey == "focus" or unitKey:match("^boss%d+$") or unitKey == "boss") then
+        local ci = settings.classificationIcon
+        if ci.enabled then
+            -- Create icon if it doesn't exist (feature was enabled after initial load)
+            if not frame.classificationIcon then
+                if not frame.indicatorFrame then
+                    local indicatorFrame = CreateFrame("Frame", nil, frame)
+                    indicatorFrame:SetAllPoints()
+                    indicatorFrame:SetFrameLevel(frame.textFrame and (frame.textFrame:GetFrameLevel() + 5) or (frame:GetFrameLevel() + 10))
+                    frame.indicatorFrame = indicatorFrame
+                end
+                local classificationIcon = frame.indicatorFrame:CreateTexture(nil, "OVERLAY")
+                classificationIcon:Hide()
+                frame.classificationIcon = classificationIcon
+                -- Register event if not already registered
+                if unitKey == "target" or unitKey == "focus" then
+                    frame:RegisterEvent("UNIT_CLASSIFICATION_CHANGED")
+                else
+                    frame:RegisterUnitEvent("UNIT_CLASSIFICATION_CHANGED", frame.unit)
+                end
+            end
+            -- Update size and position
+            frame.classificationIcon:SetSize(ci.size or 16, ci.size or 16)
+            frame.classificationIcon:ClearAllPoints()
+            local anchorInfo = GetTextAnchorInfo(ci.anchor or "LEFT")
+            frame.classificationIcon:SetPoint(anchorInfo.point, frame, anchorInfo.point, ci.xOffset or -8, ci.yOffset or 0)
+            UpdateClassificationIcon(frame)
+        elseif frame.classificationIcon then
+            frame.classificationIcon:Hide()
         end
     end
 

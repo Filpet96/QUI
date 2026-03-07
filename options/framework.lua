@@ -356,6 +356,16 @@ function GUI:UpdateSidebarSectionHighlightFromScroll(scrollFrame)
     if not order or #order == 0 or not registry then return end
 
     local currentScroll = scrollFrame:GetVerticalScroll() or 0
+
+    -- At the top — no section should be highlighted
+    if currentScroll <= 5 then
+        if frame._sidebarActiveSectionKey then
+            frame._sidebarActiveSectionKey = nil
+            self:RefreshSidebarTree(frame)
+        end
+        return
+    end
+
     local threshold = currentScroll + 28
     local activeName
     local bestOffset = -math.huge
@@ -2507,11 +2517,14 @@ function GUI:CreateFormToggle(parent, label, dbKey, dbTable, onChange, registryI
     local container = CreateFrame("Frame", nil, parent)
     container:SetHeight(FORM_ROW_HEIGHT)
 
-    -- Label on left (off-white text)
+    -- Label on left (off-white text, constrained to not overlap toggle)
     local text = container:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     SetFont(text, 12, "", C.text)
     text:SetText(label or "Option")
     text:SetPoint("LEFT", 0, 0)
+    text:SetWidth(170)
+    text:SetWordWrap(true)
+    text:SetJustifyH("LEFT")
 
     -- Toggle track (the pill-shaped background)
     local track = CreateFrame("Button", nil, container, "BackdropTemplate")
@@ -2638,11 +2651,14 @@ function GUI:CreateFormToggleInverted(parent, label, dbKey, dbTable, onChange)
     local container = CreateFrame("Frame", nil, parent)
     container:SetHeight(FORM_ROW_HEIGHT)
 
-    -- Label on left (off-white text)
+    -- Label on left (off-white text, constrained to not overlap toggle)
     local text = container:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     SetFont(text, 12, "", C.text)
     text:SetText(label or "Option")
     text:SetPoint("LEFT", 0, 0)
+    text:SetWidth(170)
+    text:SetWordWrap(true)
+    text:SetJustifyH("LEFT")
 
     -- Toggle track
     local track = CreateFrame("Button", nil, container, "BackdropTemplate")
@@ -2754,11 +2770,14 @@ function GUI:CreateFormCheckboxOriginal(parent, label, dbKey, dbTable, onChange)
     local container = CreateFrame("Frame", nil, parent)
     container:SetHeight(FORM_ROW_HEIGHT)
 
-    -- Label on left (off-white text)
+    -- Label on left (off-white text, constrained to not overlap checkbox)
     local text = container:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     SetFont(text, 12, "", C.text)
     text:SetText(label or "Option")
     text:SetPoint("LEFT", 0, 0)
+    text:SetWidth(170)
+    text:SetWordWrap(true)
+    text:SetJustifyH("LEFT")
 
     -- Checkbox aligned with other widgets (starts at 180px from left)
     local box = CreateFrame("Button", nil, container, "BackdropTemplate")
@@ -2849,11 +2868,14 @@ function GUI:CreateFormSlider(parent, label, min, max, step, dbKey, dbTable, onC
     local precision = options.precision
     local formatStr = precision and string.format("%%.%df", precision) or (step < 1 and "%.2f" or "%d")
 
-    -- Label on left (off-white text)
+    -- Label on left (off-white text, constrained to not overlap slider track)
     local text = container:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     SetFont(text, 12, "", C.text)
     text:SetText(label or "Setting")
     text:SetPoint("LEFT", 0, 0)
+    text:SetWidth(170)
+    text:SetWordWrap(true)
+    text:SetJustifyH("LEFT")
     container.label = text
 
     -- Track container (for the filled + unfilled portions)
@@ -4381,12 +4403,37 @@ function GUI:RefreshSidebarTree(frame)
                         frame._sidebarExpandedTabs[tabIndex] = true
                         frame._sidebarExpandedSubTabs[tabIndex] = frame._sidebarExpandedSubTabs[tabIndex] or {}
                         local isExpanded = frame._sidebarExpandedSubTabs[tabIndex][subTabIndex] and true or false
-                        if isExpanded then
-                            frame._sidebarExpandedSubTabs[tabIndex][subTabIndex] = false
-                            if frame._sidebarActiveSectionKey
-                                and string.match(frame._sidebarActiveSectionKey, "^" .. tabIndex .. ":" .. subTabIndex .. ":") then
-                                frame._sidebarActiveSectionKey = nil
+                        -- Read current active state at click time, not from stale closure
+                        local curActiveTab = frame.activeTab
+                        local curActiveSubTab
+                        if curActiveTab and frame.pages and frame.pages[curActiveTab] and frame.pages[curActiveTab]._subTabGroup then
+                            curActiveSubTab = frame.pages[curActiveTab]._subTabGroup.selectedTab
+                        end
+                        local isActive = (curActiveTab == tabIndex and curActiveSubTab == subTabIndex)
+                        if isExpanded and isActive then
+                            -- Check if content is scrolled away from top
+                            local regKey = GetSectionRegistryKey(tabIndex, subTabIndex)
+                            local order = GUI.SectionRegistryOrder[regKey]
+                            local registry = GUI.SectionRegistry[regKey]
+                            local scrollFrame
+                            if order and order[1] and registry and registry[order[1]] then
+                                scrollFrame = registry[order[1]].scrollParent
                             end
+                            local currentScroll = scrollFrame and scrollFrame.GetVerticalScroll and scrollFrame:GetVerticalScroll() or 0
+                            if currentScroll > 5 then
+                                -- Not at top — scroll to top and clear section highlight
+                                frame._sidebarManualSectionSelection = true
+                                scrollFrame:SetVerticalScroll(0)
+                                frame._sidebarActiveSectionKey = nil
+                                GUI:RefreshSidebarTree(frame)
+                                C_Timer.After(0.1, function()
+                                    frame._sidebarManualSectionSelection = nil
+                                end)
+                                return
+                            end
+                            -- Already at top (or no sections) — collapse
+                            frame._sidebarExpandedSubTabs[tabIndex][subTabIndex] = false
+                            frame._sidebarActiveSectionKey = nil
                             GUI:RefreshSidebarTree(frame)
                             return
                         end
@@ -4505,6 +4552,13 @@ function GUI:CreateMainFrame()
     if self.MainFrame then
         return self.MainFrame
     end
+
+    -- Rebuild section navigation state from scratch for each fresh panel build.
+    -- This prevents stale third-level sidebar entries from older tab layouts
+    -- from leaking into the current options tree.
+    self.SectionRegistry = {}
+    self.SectionRegistryOrder = {}
+    self:ClearSearchContext()
 
     -- Initialize accent colors from saved DB before creating any widgets
     local db = QUI.QUICore and QUI.QUICore.db
@@ -5118,6 +5172,15 @@ function GUI:CreateMainFrame()
     end)
 
     frame.resizeHandle = resizeHandle
+
+    -- Teardown preview/edit states when the options panel is closed
+    frame:SetScript("OnHide", function()
+        local gfem = ns and ns.QUI_GroupFrameEditMode
+        if gfem then
+            if gfem:IsEditMode() then gfem:DisableEditMode() end
+            if gfem:IsTestMode() then gfem:DisableTestMode() end
+        end
+    end)
 
     return frame
 end

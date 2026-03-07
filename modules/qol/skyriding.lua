@@ -61,6 +61,7 @@ local _vigorDirty        = true
 local _secondWindDirty   = true
 local _abilityDirty      = true
 local _visibilityDirty   = true
+local _pendingWorldRefreshTimer
 
 -- Update throttling
 local UPDATE_THROTTLE = 0.05  -- 50ms = 20 FPS
@@ -419,6 +420,7 @@ local function CreateSkyridingFrame()
     skyridingFrame:EnableMouse(false)  -- Disabled by default (locked)
     skyridingFrame:RegisterForDrag("LeftButton")
     skyridingFrame:SetScript("OnDragStart", function(self)
+        if _G.QUI_IsFrameOverridden and _G.QUI_IsFrameOverridden(self) then return end
         local settings = GetSettings()
         if settings and not settings.locked then
             self:StartMoving()
@@ -955,10 +957,12 @@ local function ApplySettings()
     local offsetY = settings.offsetY or -150
     local locked = settings.locked ~= false
 
-    -- Size and position
+    -- Size and position (skip if anchoring system has overridden this frame)
     skyridingFrame:SetSize(width, height)
-    skyridingFrame:ClearAllPoints()
-    skyridingFrame:SetPoint("CENTER", UIParent, "CENTER", offsetX, offsetY)
+    if not (_G.QUI_IsFrameOverridden and _G.QUI_IsFrameOverridden(skyridingFrame)) then
+        skyridingFrame:ClearAllPoints()
+        skyridingFrame:SetPoint("CENTER", UIParent, "CENTER", offsetX, offsetY)
+    end
 
     -- Apply HUD layer priority
     local db = QUICore and QUICore.db and QUICore.db.profile
@@ -1133,12 +1137,47 @@ local function OnUpdate(self, delta)
 end
 
 ---------------------------------------------------------------------------
+-- World/Zone Refresh
+---------------------------------------------------------------------------
+local function RefreshSkyridingState()
+    groundedTime = 0
+    fadeStart = 0
+
+    _vigorDirty = true
+    _secondWindDirty = true
+    _abilityDirty = true
+    _visibilityDirty = true
+
+    if not skyridingFrame then return end
+
+    UpdateVigorBar()
+    UpdateSecondWind()
+    UpdateAbilityIcon()
+    UpdateVisibility()
+end
+
+local function ScheduleSkyridingWorldRefresh(delay)
+    if _pendingWorldRefreshTimer then
+        _pendingWorldRefreshTimer:Cancel()
+        _pendingWorldRefreshTimer = nil
+    end
+
+    _pendingWorldRefreshTimer = C_Timer.NewTimer(delay or 0.5, function()
+        _pendingWorldRefreshTimer = nil
+        RefreshSkyridingState()
+    end)
+end
+
+---------------------------------------------------------------------------
 -- Event Handling
 ---------------------------------------------------------------------------
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 eventFrame:RegisterEvent("PLAYER_CAN_GLIDE_CHANGED")
 eventFrame:RegisterEvent("PLAYER_IS_GLIDING_CHANGED")
+eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
 eventFrame:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
 eventFrame:RegisterEvent("SPELL_UPDATE_CHARGES")
 eventFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
@@ -1156,6 +1195,13 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                 skyridingFrame:SetScript("OnUpdate", OnUpdate)
             end
         end)
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        RefreshSkyridingState()
+        -- Loading screens can briefly preserve the pre-instance mount/glide state.
+        -- Recheck once Blizzard has finished updating player movement state.
+        ScheduleSkyridingWorldRefresh(0.75)
+    elseif event == "ZONE_CHANGED_NEW_AREA" or event == "PLAYER_MOUNT_DISPLAY_CHANGED" then
+        RefreshSkyridingState()
     elseif event == "PLAYER_CAN_GLIDE_CHANGED" then
         canGlide = arg1
         -- Must call directly: OnUpdate doesn't fire when frame is hidden

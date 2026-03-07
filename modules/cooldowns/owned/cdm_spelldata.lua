@@ -30,9 +30,10 @@ local CDMSpellData = {}
 -- CONSTANTS
 ---------------------------------------------------------------------------
 local VIEWER_NAMES = {
-    essential = "EssentialCooldownViewer",
-    utility   = "UtilityCooldownViewer",
-    buff      = "BuffIconCooldownViewer",
+    essential   = "EssentialCooldownViewer",
+    utility     = "UtilityCooldownViewer",
+    buff        = "BuffIconCooldownViewer",
+    trackedBar  = "BuffBarCooldownViewer",
 }
 
 ---------------------------------------------------------------------------
@@ -46,8 +47,18 @@ local spellLists = {
 local viewersHidden = false
 local scanTimer = nil
 local initialized = false
-local lastSpellCounts = { essential = 0, utility = 0, buff = 0 }
+local lastSpellFingerprints = { essential = "", utility = "", buff = "" }
 local buffChildrenHooked = false  -- one-time hook for buff viewer aura events
+
+-- Fingerprint a spell list by ordered spellIDs so reordering is detected.
+local function ComputeSpellFingerprint(list)
+    if type(list) ~= "table" or #list == 0 then return "" end
+    local parts = {}
+    for i, entry in ipairs(list) do
+        parts[i] = tostring(entry.spellID or 0)
+    end
+    return table.concat(parts, ",")
+end
 
 -- TAINT SAFETY: Track hook state in a weak-keyed table instead of writing
 -- _quiBuffHooked directly to Blizzard frames. Direct property writes taint
@@ -383,12 +394,12 @@ local function ScanAll()
     ScanViewer("utility")
     ScanViewer("buff")
 
-    -- Check if spell counts changed (indicates meaningful data change)
+    -- Check if spell lists changed (count OR order) via fingerprint comparison
     local changed = false
     for viewerType, list in pairs(spellLists) do
-        local count = type(list) == "table" and #list or 0
-        if count ~= lastSpellCounts[viewerType] then
-            lastSpellCounts[viewerType] = count
+        local fingerprint = ComputeSpellFingerprint(list)
+        if fingerprint ~= lastSpellFingerprints[viewerType] then
+            lastSpellFingerprints[viewerType] = fingerprint
             changed = true
         end
     end
@@ -460,13 +471,13 @@ end
 function CDMSpellData:ForceScan()
     -- Scan all three viewers synchronously but do NOT fire QUI_OnSpellDataChanged.
     -- This prevents a feedback loop: RefreshAll → ForceScan → changed → callback → RefreshAll.
-    -- Update lastSpellCounts so the periodic ScanAll ticker won't re-detect the same change.
+    -- Update fingerprints so the periodic ScanAll ticker won't re-detect the same change.
     if InCombatLockdown() then return end
     ScanViewer("essential")
     ScanViewer("utility")
     ScanViewer("buff")
     for viewerType, list in pairs(spellLists) do
-        lastSpellCounts[viewerType] = type(list) == "table" and #list or 0
+        lastSpellFingerprints[viewerType] = ComputeSpellFingerprint(list)
     end
 end
 
@@ -662,7 +673,7 @@ SlashCmdList["CDMDEBUG"] = function()
             print(P, "  showBuffIconSwipe:", tostring(resolved.showBuffIconSwipe))
             print(P, "  showGCDSwipe:", tostring(resolved.showGCDSwipe))
             print(P, "  showCooldownSwipe:", tostring(resolved.showCooldownSwipe))
-            print(P, "  showRechargeEdge:", tostring(resolved.showRechargeEdge))
+
             print(P, "  overlayColorMode:", tostring(resolved.overlayColorMode or "nil"))
             print(P, "  overlayColor:", tostring(resolved.overlayColor and ("{" .. table.concat(resolved.overlayColor, ", ") .. "}") or "nil"))
             print(P, "  swipeColorMode:", tostring(resolved.swipeColorMode or "nil"))

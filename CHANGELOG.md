@@ -65,6 +65,70 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+
+
+
+
+
+## v2.46.9 - 2026-03-07
+
+### Added
+- feat: add Whirlwind, Tip of the Spear, and Essence regen resource bars
+- added second icon option for the minimap button drawer
+
+### Fixed
+- fixed nested menu entries for action bars and onwards
+- fixed missing icons for the target classification
+- fix: combat taint safety for keystone tracker hide and tooltip widget setup
+- fix: eliminate tooltip taint by skipping all addon work in combat
+- fix: detect spell list reordering via fingerprint instead of count
+## v2.46.8 - 2026-03-07
+
+### Added
+- feat: configurable minimap drawer toggle button size
+- feat: add classification icon for target, focus, and boss unit frames
+- feat: show unit frames when player health is below 100%
+
+### Fixed
+- fix skyriding bar staying visible when flying into dungeons
+- fix: exclude maxLength from castbar copy to prevent truncation
+- fix: improve CDM aura detection, initial cooldown sync, and tooltip taint safety
+- fix: stop clearing layoutType/layoutTextureKit on tooltip frame to prevent taint
+- fix: show real item/slot cooldown instead of buff duration in trackers
+- fix: gate all tooltip features behind master enabled toggle
+- fix: pre-create power bar globals for Edit Mode anchoring at load time
+- fix: ensure power bar globals exist for Edit Mode anchoring
+## v2.46.7 - 2026-03-06
+
+### Fixed
+- revert: restore UISpecialFrames for ESC-to-close on chat and options frames
+## v2.46.6 - 2026-03-06
+
+### Fixed
+- fix: tooltip combat hide flash and broaden SetSpellByID/SetItemByID suppression
+- fix: replace UISpecialFrames with OnKeyDown ESC handler to avoid taint
+- fix: sidebar subtab active state reads current tab at click time
+- fix: separate aura/cooldown swipe color defaults, clarify options labels
+- fix: datapanel init timing and gold datatext initial update
+- feat: anchoring system integration, custom tracker improvements, taint safety
+- fix: consumable frame SetScale combat taint, tooltip hook taint safety
+- fix: remove RefreshTotemData method replacement that tainted CDM viewer
+- fix: font system taint safety, CDM bar and buffbar improvements
+## v2.46.5 - 2026-03-06
+
+### Added
+- added tracked buff bar factory to QUI CDM engine
+
+### Fixed
+- fix: buff bar active state, parent mismatch, and Edit Mode taint
+- fix: stop overwriting point/relative on container position save
+## v2.46.4 - 2026-03-05
+
+### Fixed
+- fix(custom-trackers): restore clickable tracker actions after info/usability updates
+- fix: remove border debug logging, fix fade-hide flag tracking
+- fix: action bar border toggle and NormalTexture re-hide on updates
 ## v2.46.3 - 2026-03-05
 
 ### Fixed
